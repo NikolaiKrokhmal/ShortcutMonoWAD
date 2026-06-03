@@ -6,6 +6,8 @@ scikit-image
 opencv-python
 easydict
 tqdm
-easydict
-tensorboard==2.15.1
+wandb
 numpy==1.26.4
+jupyter
+hydra-core
+pytorch-lightning

@@ -396,8 +396,7 @@ int deform_conv_backward_parameters_cuda(
   if (input.ndimension() == 3) {
     // Force batch
     batch = 0;
-    input = input.view(
-        at::IntList({1, input.size(0), input.size(1), input.size(2)}));
+    input = input.view({1, input.size(0), input.size(1), input.size(2)});
     gradOutput = gradOutput.view(
         {1, gradOutput.size(0), gradOutput.size(1), gradOutput.size(2)});
   }
