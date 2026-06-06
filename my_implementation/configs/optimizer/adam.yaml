@@ -1,0 +1,4 @@
+_target_: torch.optim.Adam
+lr: 1e-4
+weight_decay: 0.0
+clipped_gradient_norm: 35.0   # consumed by Trainer(gradient_clip_val=...), not Adam

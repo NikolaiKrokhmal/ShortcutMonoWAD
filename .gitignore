@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 
 /workdirs
+/my_implementation/data/

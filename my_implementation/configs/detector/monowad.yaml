@@ -1,0 +1,8 @@
+# Detector spec. Hydra instantiate() replaces the old DETECTOR_DICT registry.
+# TODO: fill _target_ and submodule cfg when porting models/ in Phase 3.
+_target_: monowad.models.detector.MonoWAD
+
+# head: { ... }
+# anchors: { ... }
+# loss: { ... }
+# test_cfg: { ... }

@@ -1,0 +1,18 @@
+# Data & artifacts (regenerable, large — never commit)
+data/
+outputs/
+wandb/
+*.h5
+*.pkl
+*.npy
+*.png
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Env
+.env

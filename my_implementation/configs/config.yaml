@@ -1,0 +1,12 @@
+# Top-level Hydra config. Composes the groups below; override any from the CLI.
+defaults:
+  - paths: default
+  - data: kitti
+  - detector: monowad
+  - optimizer: adam
+  - scheduler: cosine
+  - trainer: default
+  - logger: wandb
+  - _self_
+
+seed: 42
