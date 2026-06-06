@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 from visualDet3D.networks.utils.registry import PIPELINE_DICT
 from visualDet3D.evaluator.kitti.evaluate import evaluate
 from visualDet3D.networks.utils.utils import BBox3dProjector, BackProjection
@@ -21,7 +20,7 @@ from visualDet3D.networks.lib.fast_utils.hill_climbing import post_opt
 def evaluate_kitti_obj(cfg:EasyDict, 
                        model:nn.Module,
                        dataset_val:Sized,
-                       writer:SummaryWriter,
+                       writer,
                        epoch_num:int,
                        result_path_split='validation',
                        eval_weather_type:str="clear"

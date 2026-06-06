@@ -5,9 +5,11 @@ einops
 scikit-image
 opencv-python
 easydict
+h5py
 tqdm
 wandb
 numpy==1.26.4
 jupyter
 hydra-core
 pytorch-lightning
+pyrootutils

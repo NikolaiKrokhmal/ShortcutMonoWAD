@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from easydict import EasyDict
 from visualDet3D.utils.utils import LossLogger
@@ -15,7 +14,7 @@ from visualDet3D.networks.utils.registry import PIPELINE_DICT
 @PIPELINE_DICT.register_module
 def train_mono_detection(data, module:nn.Module,
                      optimizer:optim.Optimizer,
-                     writer:SummaryWriter=None, 
+                     writer=None,
                      loss_logger:LossLogger=None, 
                      global_step:int=None,
                      epoch_num:int=None,

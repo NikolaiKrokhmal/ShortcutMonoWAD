@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from easydict import EasyDict
 from visualDet3D.utils.utils import LossLogger, compound_annotation
@@ -15,7 +14,7 @@ from typing import Tuple, List
 @PIPELINE_DICT.register_module
 @torch.no_grad()
 def test_mono_detection(data, module:nn.Module,
-                     writer:SummaryWriter, 
+                     writer=None,
                      loss_logger:LossLogger=None, 
                      global_step:int=None, 
                      cfg:EasyDict=None,
