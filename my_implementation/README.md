@@ -78,8 +78,11 @@ Bare `python scripts/train.py <overrides...>` works too, *if* you have an env wh
 | `trainer.gradient_clip_val=0.1` | 0.1 | Gradient-norm clip (lives on the Trainer, not the optimizer). |
 | `trainer.check_val_every_n_epoch=5` | 5 | Validation cadence. |
 | `trainer.precision=16` | 32 | Mixed precision to save memory. |
-| `+trainer.limit_val_batches=N` | — | **Cap validation.** Each val frame runs the full 15-step diffusion one at a time (~2 s/frame), so a whole-val pass is hours. Keep this small until AP eval lands. |
+| `+trainer.limit_val_batches=N` | — | **Cap validation** for smoke runs. Each val frame runs the full 15-step diffusion one at a time (~2 s/frame), so a whole-val pass is hours. NB: a real AP number needs the *whole* val set — don't cap it when you actually want a score. |
 | `+trainer.enable_checkpointing=false` | true | Skip checkpoint writing for smoke runs. |
+| `eval.enabled=false` | true | Skip KITTI AP scoring → inference-only val (faster sanity pass). |
+| `eval.label_dir=...` | `${paths.root_dir}/../data/KITTI/object/training/label_2` | KITTI ground-truth `label_2` dir for AP. Override if your KITTI tree is elsewhere. |
+| `eval.score_thr=0.4` | 0.4 | Min confidence for a detection to be written to its KITTI result file. |
 | `trainer.fast_dev_run=true` | false | One train + one val batch, no logging/checkpoints — fastest "does it run" check. |
 | `seed=42` | 42 | Global seed (`seed_everything(..., workers=True)`). |
 
@@ -95,8 +98,11 @@ Logging is configured by `configs/logger/wandb.yaml` (`WandbLogger`, project **`
 
 - `train/loss`, `train/cls_loss`, `train/reg_loss`, `train/proposed_loss`, plus each
   individual loss term from the detector's loss dict;
-- `val/num_detections` — the per-frame detection count from the inference sanity pass
-  (real KITTI AP is not wired yet — see CLAUDE.md "Stubs / TODO").
+- `val/num_detections` — the per-frame detection count from the inference pass;
+- KITTI AP (when `eval.enabled=true`, on the validation cadence): per class
+  `val/<cls>_{3d,bev,bbox}_{easy,mod,hard}` — e.g. `val/Car_3d_mod` (the headline number,
+  also on the progress bar). The full per-class AP table is printed to stdout too. See
+  CLAUDE.md "KITTI AP validation" for the flow.
 
 **Online (default):** runs land at `https://wandb.ai/<your-entity>/monowad`. Log in once with
 `wandb login` (or set `WANDB_API_KEY`). Set the entity via `logger.entity=<team-or-user>` and a
