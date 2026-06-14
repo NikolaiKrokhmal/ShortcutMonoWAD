@@ -2,10 +2,13 @@
 data/
 outputs/
 wandb/
+checkpoints/
 *.h5
 *.pkl
 *.npy
 *.png
+*.pth
+*.ckpt
 
 # Python
 __pycache__/

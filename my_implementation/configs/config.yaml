@@ -10,3 +10,8 @@ defaults:
   - _self_
 
 seed: 42
+
+# Optional path to a pretrained MonoWAD_3D state_dict (mono_core.* / bbox_head.* keys).
+# Loaded into the detector at module init with strict=False. null = train from scratch.
+# Override on the CLI: `ckpt_path=null` or `ckpt_path=/path/to/other.pth`.
+ckpt_path: ${paths.root_dir}/checkpoints/MonoWAD_3D.pth

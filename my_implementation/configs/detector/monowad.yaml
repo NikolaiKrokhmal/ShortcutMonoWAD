@@ -1,8 +1,59 @@
-# Detector spec. Hydra instantiate() replaces the old DETECTOR_DICT registry.
-# TODO: fill _target_ and submodule cfg when porting models/ in Phase 3.
-_target_: monowad.models.detector.MonoWAD
+# Detector spec. Hydra instantiate() replaces the old DETECTOR_DICT registry:
+#   MonoWAD_3D(network_cfg=<everything under `network_cfg` below>)
+# Values ported from legacy config/config.py (the `detector` edict + its anchors/
+# head_layer/head_loss/head_test sub-dicts). Sequences that the legacy code stored as
+# np.array (ratios/scales) are plain YAML lists here; Anchors() coerces them back.
+_target_: monowad.models.detector.MonoWAD_3D
 
-# head: { ... }
-# anchors: { ... }
-# loss: { ... }
-# test_cfg: { ... }
+network_cfg:
+  obj_types: [Car]
+
+  # MonoWAD core (DLA-102 backbone is hard-wired inside MonoWAD).
+  #   pretrained: pull ImageNet DLA weights on init (one-time download). Keep False
+  #     when loading a full MonoWAD checkpoint — those weights overwrite it anyway, so
+  #     this avoids all network access.
+  #   flash_attn: SDPA flash path in the diffusion U-Net (needs a GPU).
+  mono_backbone:
+    pretrained: false
+    flash_attn: true
+
+  head:
+    num_features_in: 256
+    num_classes: 1                       # len(obj_types)
+    num_regression_loss_terms: 13
+    # Anchors load anchor_{mean,std}_<cls>.npy from here (flat, post-HDF5 layout).
+    preprocessed_path: ${paths.train_dir}
+
+    anchors_cfg:
+      obj_types: [Car]
+      pyramid_levels: [3]
+      strides: [8]                       # 2 ** 3
+      sizes: [24]
+      ratios: [0.5, 1.0, 2.0]
+      # scales: 2 ** (i / 4) for i in range(16)
+      scales: [1.0, 1.189207115002721, 1.4142135623730951, 1.6817928305074292,
+               2.0, 2.378414230005442, 2.8284271247461903, 3.3635856610148584,
+               4.0, 4.756828460010884, 5.656854249492381, 6.727171322029717,
+               8.0, 9.513656920021768, 11.313708498984761, 13.454342644059435]
+
+    layer_cfg:
+      num_features_in: 256
+      num_cls_output: 2                  # len(obj_types) + 1
+      num_reg_output: 12
+      cls_feature_size: 256
+      reg_feature_size: 256
+
+    loss_cfg:
+      fg_iou_threshold: 0.5
+      bg_iou_threshold: 0.4
+      L1_regression_alpha: 25            # 5 ** 2
+      focal_loss_gamma: 2.0
+      balance_weight: [20.0]
+      # [x, y, w, h, cx, cy, z, sin2a, cos2a, w, h, l, depth]
+      regression_weight: [1, 1, 1, 1, 1, 1, 12, 1, 1, 0.5, 0.5, 0.5, 1]
+
+    test_cfg:
+      score_thr: 0.75
+      cls_agnostic: false
+      nms_iou_thr: 0.4
+      post_optimization: false

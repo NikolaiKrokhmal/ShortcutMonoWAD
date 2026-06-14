@@ -95,3 +95,66 @@ class BBox3dProjector(nn.Module):
         camera_coord = torch.matmul(tensor_p2, camera_corners).squeeze(-1)  # [N, 8, 3]
         homo_coord = camera_coord / (camera_coord[:, :, 2:] + 1e-6)  # [N, 8, 3]
         return abs_corners, homo_coord, thetas
+
+
+def calc_iou(a, b):
+    """Pairwise 2D IoU between anchor boxes ``a`` [N, 4] and gt boxes ``b`` [M, 4].
+
+    Boxes are [x1, y1, x2, y2]. Returns [N, M]. Ported from
+    visualDet3D/networks/utils/utils.py.
+    """
+    area = (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
+
+    iw = torch.min(torch.unsqueeze(a[:, 2], dim=1), b[:, 2]) - torch.max(torch.unsqueeze(a[:, 0], 1), b[:, 0])
+    ih = torch.min(torch.unsqueeze(a[:, 3], dim=1), b[:, 3]) - torch.max(torch.unsqueeze(a[:, 1], 1), b[:, 1])
+
+    iw = torch.clamp(iw, min=0)
+    ih = torch.clamp(ih, min=0)
+
+    ua = torch.unsqueeze((a[:, 2] - a[:, 0]) * (a[:, 3] - a[:, 1]), dim=1) + area - iw * ih
+    ua = torch.clamp(ua, min=1e-8)
+
+    intersection = iw * ih
+    return intersection / ua
+
+
+class ClipBoxes(nn.Module):
+    """Clip 2D box coords to the image bounds. Mutates and returns ``boxes``.
+
+    Ported from visualDet3D/networks/utils/utils.py.
+    """
+
+    def __init__(self, width=None, height=None) -> None:
+        super().__init__()
+
+    def forward(self, boxes, img):
+        _, _, height, width = img.shape
+        boxes[:, 0] = torch.clamp(boxes[:, 0], min=0)
+        boxes[:, 1] = torch.clamp(boxes[:, 1], min=0)
+        boxes[:, 2] = torch.clamp(boxes[:, 2], max=width)
+        boxes[:, 3] = torch.clamp(boxes[:, 3], max=height)
+        return boxes
+
+
+class BackProjection(nn.Module):
+    """Back-project image-plane 3D box centers to camera coords using P2.
+
+    forward:
+        bbox3d [N, 7]: homo_x, homo_y, z, w, h, l, alpha
+        p2 [3, 4]
+        return [N, 7]: x3d, y3d, z, w, h, l, alpha
+    Ported from visualDet3D/networks/utils/utils.py.
+    """
+
+    def forward(self, bbox3d, p2):
+        fx = p2[0, 0]
+        fy = p2[1, 1]
+        cx = p2[0, 2]
+        cy = p2[1, 2]
+        tx = p2[0, 3]
+        ty = p2[1, 3]
+
+        z3d = bbox3d[:, 2:3]  # [N, 1]
+        x3d = (bbox3d[:, 0:1] * z3d - cx * z3d - tx) / fx  # [N, 1]
+        y3d = (bbox3d[:, 1:2] * z3d - cy * z3d - ty) / fy  # [N, 1]
+        return torch.cat([x3d, y3d, bbox3d[:, 2:]], dim=1)
