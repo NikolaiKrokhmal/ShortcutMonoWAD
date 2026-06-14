@@ -14,15 +14,17 @@ What is ported here
   exercises the full inference graph and surfaces the detection count. It is a runnable
   sanity pass.
 
-Known gap (next tier)
----------------------
-Full KITTI AP validation is **not** wired yet. It needs two things that are still
-missing: (1) the numba KITTI evaluator (``monowad.eval.kitti_eval`` is a stub), and
-(2) the eval-time 2D-box remapping (legacy ``test_one``) which requires ``original_P`` /
-``original_shape`` to be carried through the val ``collate_fn`` (currently dropped).
-``on_validation_epoch_end`` therefore only logs that AP scoring is pending.
+* ``validation_step`` / ``on_validation_epoch_*`` — the body of legacy ``test_one`` +
+  ``evaluate_kitti_obj``: per frame, run the detector's test path, back-project the 3D
+  state to camera coords, remap the 2D box to *original* KITTI resolution via
+  ``original_P`` vs the post-resize ``P2``, and write a KITTI result ``.txt``. At epoch
+  end the numba KITTI evaluator scores AP and the headline numbers are logged. Controlled
+  by ``cfg.eval`` (set ``eval.enabled=false`` for an inference-only sanity pass).
 """
 from __future__ import annotations
+
+import os
+import shutil
 
 import numpy as np
 import hydra
@@ -31,6 +33,8 @@ import torch
 from omegaconf import DictConfig
 
 from .utils.annotations import compound_annotation
+from .utils.geometry import BackProjection, BBox3dProjector
+from .eval.result_writer import write_result_to_file
 
 
 class MonoWADModule(pl.LightningModule):
@@ -42,6 +46,21 @@ class MonoWADModule(pl.LightningModule):
         # ordered class names, used to index labels when compounding annotations
         self.obj_types = list(self.detector.obj_types)
         self._warned_no_ap = False
+
+        # eval-time geometry (back-project 3D state to camera coords + recover yaw).
+        # Registered as submodules so Lightning moves their buffers to the right device.
+        self.backprojector = BackProjection()
+        self.projector = BBox3dProjector()
+
+        # KITTI AP eval config (see configs/config.yaml ``eval``); absent -> disabled.
+        eval_cfg = cfg.get("eval", None)
+        self._eval_enabled = bool(eval_cfg.enabled) if eval_cfg is not None else False
+        if self._eval_enabled:
+            self._label_dir = eval_cfg.label_dir
+            self._result_dir = eval_cfg.result_dir
+            self._score_thr = float(eval_cfg.get("score_thr", 0.4))
+            self._eval_gpu = int(eval_cfg.get("gpu", 0))
+        self._val_frame_ids: list[str] = []
 
         ckpt_path = cfg.get("ckpt_path", None)
         if ckpt_path:
@@ -112,10 +131,21 @@ class MonoWADModule(pl.LightningModule):
         return loss
 
     # ------------------------------------------------------------------ val
+    def on_validation_epoch_start(self) -> None:
+        # Fresh result dir each epoch so stale .txt files can't leak into scoring.
+        if not self._eval_enabled:
+            return
+        self._val_frame_ids = []
+        if os.path.isdir(self._result_dir):
+            shutil.rmtree(self._result_dir)
+        os.makedirs(self._result_dir, exist_ok=True)
+
     def validation_step(self, batch, batch_idx):
-        # val collate -> (rgb, calib, labels, bbox2d, bbox3d, foggy); no depth GT
-        rgb, calib, labels = batch[0], batch[1], batch[2]
+        # val collate -> (rgb, calib, labels, bbox2d, bbox3d, foggy, original_Ps, frame_ids)
+        rgb, calib = batch[0], batch[1]
         foggy = batch[5] if len(batch) > 5 else None
+        original_Ps = batch[6] if len(batch) > 6 else None
+        frame_ids = batch[7] if len(batch) > 7 else None
 
         # test_forward expects batch size 1 (legacy constraint)
         num_det = 0
@@ -123,22 +153,97 @@ class MonoWADModule(pl.LightningModule):
             img_i = rgb[i : i + 1].float().contiguous()
             calib_i = calib[i : i + 1].float()
             foggy_i = foggy[i : i + 1].float().contiguous() if foggy is not None else None
-            scores, bboxes, _ = self.detector(
+            scores, bboxes, cls_idx = self.detector(
                 [img_i, calib_i, foggy_i], eval_weather_type="clear"
             )
             num_det += int(scores.shape[0])
 
+            if self._eval_enabled and frame_ids is not None:
+                self._write_kitti_result(
+                    scores, bboxes, cls_idx, calib_i[0], original_Ps[i], frame_ids[i]
+                )
+
         self.log("val/num_detections", float(num_det), batch_size=rgb.shape[0])
 
+    @staticmethod
+    def _remap_2d(bbox_2d: torch.Tensor, P2: torch.Tensor, original_P: torch.Tensor) -> torch.Tensor:
+        """Map 2D boxes from the post-resize (288x1280) frame back to original KITTI
+        resolution. Folds CropTop + Resize into one affine derived from the two calib
+        matrices (legacy ``test_one``); the crop offset falls out of ``shift_top``."""
+        scale_x = original_P[0, 0] / P2[0, 0]
+        scale_y = original_P[1, 1] / P2[1, 1]
+        shift_left = original_P[0, 2] / scale_x - P2[0, 2]
+        shift_top = original_P[1, 2] / scale_y - P2[1, 2]
+        bbox_2d[:, 0:4:2] += shift_left
+        bbox_2d[:, 1:4:2] += shift_top
+        bbox_2d[:, 0:4:2] *= scale_x
+        bbox_2d[:, 1:4:2] *= scale_y
+        return bbox_2d
+
+    def _write_kitti_result(self, scores, bboxes, cls_idx, P2, original_P, frame_id) -> None:
+        """Per-frame port of legacy ``test_one``: 3D back-projection + 2D remap, then write
+        the KITTI result file named by ``frame_id``."""
+        self._val_frame_ids.append(frame_id)
+        P2 = P2.detach()  # [3, 4] post-resize calib the model saw
+
+        if bboxes.shape[0] == 0:
+            # write an empty file so the frame still participates in (and lowers) recall
+            write_result_to_file(self._result_dir, frame_id, [], np.zeros((0, 4), np.float32))
+            return
+
+        bbox_2d = bboxes[:, 0:4].clone()
+        bbox_3d_state = bboxes[:, 4:]  # [N, 7] proj_cx, proj_cy, z, w, h, l, alpha
+        bbox_3d_state_3d = self.backprojector(bbox_3d_state, P2)  # [N, 7] camera coords
+        _, _, thetas = self.projector(bbox_3d_state_3d, P2)
+
+        original_P = torch.as_tensor(original_P, dtype=P2.dtype, device=P2.device)
+        bbox_2d = self._remap_2d(bbox_2d, P2, original_P)
+
+        obj_names = [self.obj_types[int(c)] for c in cls_idx]
+        write_result_to_file(
+            self._result_dir,
+            frame_id,
+            scores.detach().cpu().numpy(),
+            bbox_2d.detach().cpu().numpy(),
+            bbox_3d_state_3d.detach().cpu().numpy(),
+            thetas.detach().cpu().numpy(),
+            obj_types=obj_names,
+            threshold=self._score_thr,
+        )
+
     def on_validation_epoch_end(self) -> None:
-        # TODO(next tier): port the numba KITTI evaluator + carry original_P/shape
-        # through the val collate, then write KITTI result files and self.log() AP.
-        if not self._warned_no_ap:
-            print(
-                "[MonoWADModule] validation ran inference only; KITTI AP scoring is not "
-                "wired yet (needs monowad.eval.kitti_eval + eval-time calib remapping)."
+        if not self._eval_enabled:
+            if not self._warned_no_ap:
+                print("[MonoWADModule] eval.enabled=false; validation ran inference only.")
+                self._warned_no_ap = True
+            return
+        if not self._val_frame_ids:
+            return
+
+        # Lazy import: pulls in the GPU-only numba rotated-IoU kernels (see kitti_eval).
+        from .eval.kitti_eval import evaluate_kitti, parse_ap
+
+        current_classes = list(range(len(self.obj_types)))
+        try:
+            result_texts = evaluate_kitti(
+                self._result_dir, self._label_dir, self._val_frame_ids,
+                current_classes, gpu=self._eval_gpu,
             )
-            self._warned_no_ap = True
+        except Exception as exc:  # don't let a scoring hiccup kill the whole run
+            print(f"[MonoWADModule] KITTI AP scoring failed: {exc}")
+            return
+
+        for cls_i, text in zip(current_classes, result_texts):
+            cls_name = self.obj_types[cls_i]
+            print(text)
+            ap = parse_ap(text)
+            for metric in ("3d", "bev", "bbox"):
+                vals = ap.get(metric)
+                if vals and len(vals) == 3:
+                    easy, mod, hard = vals
+                    self.log(f"val/{cls_name}_{metric}_easy", easy)
+                    self.log(f"val/{cls_name}_{metric}_mod", mod, prog_bar=(metric == "3d"))
+                    self.log(f"val/{cls_name}_{metric}_hard", hard)
 
     # ------------------------------------------------------------------ optim
     def configure_optimizers(self):

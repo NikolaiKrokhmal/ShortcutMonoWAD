@@ -164,15 +164,33 @@ file imports `visualDet3D`. Port done in two tiers (see `../PLAN.md`).
   ```
   Note: Trainer keys not already in `configs/trainer/default.yaml` need a `+` (struct mode).
 
+### KITTI AP validation (wired) — `monowad/eval/`
+- **Ported in** off `visualDet3D/evaluator/kitti`: `eval.py`, `kitti_common.py`,
+  `rotate_iou.py`, `evaluate.py` (near-verbatim), plus `result_writer.py`
+  (`write_result_to_file`) and `kitti_eval.py` (the `evaluate_kitti` entry + `parse_ap`).
+- **GPU-only at import.** `rotate_iou.py`'s `@cuda.jit` rotated-IoU kernels compile *at
+  import time* and need a CUDA device, so `kitti_eval.evaluate_kitti` imports the heavy
+  modules **lazily** — importing `monowad.eval` stays CPU-safe; only scoring touches the GPU.
+- **Eval flow (`module.py`):** `on_validation_epoch_start` cleans the result dir;
+  `validation_step` runs `test_forward` per frame, back-projects the 3D state to camera
+  coords (`BackProjection`/`BBox3dProjector`), remaps the 2D box to original resolution via
+  `original_P` vs post-resize `P2` (`_remap_2d`, legacy `test_one`), and writes a KITTI
+  result `.txt` named by `frame_id`; `on_validation_epoch_end` calls `evaluate_kitti` and
+  `self.log()`s Car 3d/bev/bbox AP (easy/mod/hard). Controlled by `cfg.eval`
+  (`enabled`, `label_dir`, `result_dir`, `score_thr`, `gpu`); set `eval.enabled=false` for
+  an inference-only val pass.
+- **`get_split_parts` guarded** (only deviation from the verbatim evaluator copy): the
+  legacy returns leading zero-size partitions when `num_examples < num_parts` (50), crashing
+  `np.concatenate([])`. It never bit legacy (full val only); guarded so partial/smoke val
+  scores fine. The **full** val set (3769) takes that path natively.
+
 ### Stubs / TODO (next)
-- **KITTI AP validation** not wired. `on_validation_epoch_end` only logs that scoring is
-  pending. Needs (1) the numba KITTI evaluator (`monowad/eval/kitti_eval.py` is a 1-line
-  stub) and (2) the eval-time 2D-box remapping (legacy `test_one`), which requires
-  `original_P` / `original_shape` to be carried through the **val `collate_fn`** (currently
-  dropped — see Known gaps).
-- **Full val epoch is impractical as-is.** `validation_step` pushes every val frame through
-  the full 15-step diffusion one at a time (~2 s/frame), so a whole-val-set pass is ~hours.
-  Cap it (`+trainer.limit_val_batches=N`) until AP eval lands; revisit batching the val path.
+- **Full val epoch is slow.** `validation_step` pushes every val frame through the full
+  15-step diffusion one at a time (~2 s/frame), so a whole-val-set AP pass is ~hours. AP
+  needs the **whole** set (no `limit_val_batches`); batching the val inference path is the
+  main remaining perf task.
+- Containers need `--shm-size=8g` (as `run.sh` sets) when `data.num_workers>0`, else the
+  val DataLoader workers can die ("worker exited unexpectedly"); `num_workers=0` also avoids it.
 
 ## Augmentation pipeline (`transforms.py`)
 
@@ -259,17 +277,21 @@ box/`x`/`cx` reflect about the width).
 - **Loss bookkeeping is Lightning's.** `training_step` only returns the scalar loss + logs;
   `optimizer.zero_grad`/`step` and the AverageMeter/LossLogger are gone (Lightning + WandB).
   Degenerate steps return `None` (Lightning skips them) instead of the legacy early `return`.
-- **Validation is inference-only for now.** Val has no depth GT, so the training loss can't be
-  computed on it; `validation_step` runs `test_forward` (sanity, logs detection count). Real
-  AP needs the evaluator + remapping (see Stubs / Known gaps).
+- **Validation scores KITTI AP, not a loss.** Val has no depth GT, so the training loss can't
+  be computed on it; `validation_step` runs `test_forward` and writes KITTI result files, and
+  `on_validation_epoch_end` scores AP (see "KITTI AP validation" above).
 
 ## Known gaps / watch-outs
 
-- **Eval-time calib (now the active blocker for AP validation).** The h5 stores only
-  *post-resize* `P2` (no original-resolution P2 or original image size). KITTI 2D-AP eval needs
-  to map boxes back to original resolution — recover via `frame_id` + KITTI calib files at eval
-  time. Also the val `collate_fn` currently drops `original_P` / `original_shape`, so they don't
-  reach `validation_step`; both must be carried through before `on_validation_epoch_end` can
-  write KITTI result files + score AP.
-- `dataset.original_P` / `original_shape` are the **post-resize** values (best available here),
-  not the true pre-resize originals the legacy dataset carried.
+- **Eval calib comes from `P2_original` in the h5.** `pack_hdf5.py` stores both the
+  *post-resize* `P2` (what the model sees) **and** `P2_original` (the pre-CropTop/Resize,
+  full-KITTI-resolution calib) per frame, plus `frame_id`. The dataset returns the real
+  `original_P` (falls back to post-resize `P2` only for legacy packs lacking the field —
+  `dataset.has_original_P`), and the val/test `collate_fn` carries `original_P` + `frame_id`
+  through (val tuple is now **8** elements; train tuple unchanged). 3D boxes are metric and
+  need no remap; only the 2D box is mapped back to original resolution for 2D AP.
+- **3D AP is resolution-independent**; `original_shape` is *not* needed (the legacy only used
+  it in the 2D-only branch of `test_one`, which MonoWAD never takes since it runs 3D).
+- **Re-pack required** for the above: `data.h5` written before `P2_original` was added lacks
+  it. After re-packing (writes to `workdirs/MonoWAD/output/{training,validation}`), copy the
+  files to `my_implementation/data/{train,val}/data.h5` (where `paths.{train,val}_dir` point).

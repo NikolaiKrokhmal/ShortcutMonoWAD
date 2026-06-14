@@ -1,0 +1,14 @@
+# KITTI mono dataset / dataloader config.
+# TODO: port concrete values from legacy config/config.py during Phase 2.
+batch_size: 8
+num_workers: 8
+pin_memory: true
+
+rgb_shape: [288, 1280]      # H, W
+rgb_mean: [0.485, 0.456, 0.406]
+rgb_std: [0.229, 0.224, 0.225]
+
+train_h5: ${paths.train_dir}/data.h5
+val_h5: ${paths.val_dir}/data.h5
+anchor_mean: ${paths.train_dir}/anchor_mean_Car.npy
+anchor_std: ${paths.train_dir}/anchor_std_Car.npy

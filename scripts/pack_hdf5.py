@@ -31,6 +31,7 @@ Datasets written to ``{preprocessed_path}/{split}/data.h5``:
     foggy         uint8   [N, 288, 1280, 3]  baked foggy_2  (training/validation only)
     depth         uint16  [N, Hd, Wd]        precomputed depth GT (training only)
     P2            float32 [N, 3, 4]          post-resize calibration
+    P2_original   float32 [N, 3, 4]          original-resolution calibration (pre CropTop/Resize)
     frame_id      str     [N]                original KITTI id (sanity/debug)
     labels/count  int32   [N]               #objects per frame (training/validation only)
     labels/data   float32 [M, 14]           flattened label rows, cols = ``label_fields`` attr
@@ -125,6 +126,7 @@ def pack_split(cfg, split, compression="lzf"):
         # Datasets that need an image shape are created lazily on the first frame.
         clear_ds = foggy_ds = depth_ds = None
         p2_ds = h5.create_dataset("P2", shape=(n, 3, 4), dtype="float32")
+        p2_orig_ds = h5.create_dataset("P2_original", shape=(n, 3, 4), dtype="float32")
         fid_ds = h5.create_dataset("frame_id", shape=(n,), dtype=h5py.string_dtype("utf-8"))
 
         # Labels are ragged (variable #objects/frame). We store them flattened across
@@ -138,6 +140,7 @@ def pack_split(cfg, split, compression="lzf"):
             clear = read_image(frame.origin2_path)
             foggy = read_image(frame.foggy2_path) if spec["foggy"] else None
             p2 = np.asarray(frame.calib.P2, dtype=np.float32).copy()
+            p2_original = p2.copy()  # snapshot before geo() mutates it (post-resize -> p2_b)
 
             # Bake CropTop + Resize; geo also returns the adjusted P2.
             clear_b, foggy_b, p2_b = geo(clear, foggy, p2=p2)[:3]
@@ -156,6 +159,7 @@ def pack_split(cfg, split, compression="lzf"):
             if spec["foggy"]:
                 foggy_ds[i] = np.ascontiguousarray(foggy_b, dtype=np.uint8)
             p2_ds[i] = p2_b
+            p2_orig_ds[i] = p2_original
             fid_ds[i] = os.path.splitext(os.path.basename(frame.origin2_path))[0]
 
             if spec["label"]:
