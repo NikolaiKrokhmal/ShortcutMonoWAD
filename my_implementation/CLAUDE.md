@@ -31,9 +31,13 @@ docker exec -w /workspace/my_implementation \
   the dataloaders, so CUDA is already initialized in the parent; forked train workers inherit
   that context and abort with `CUDA error: initialization error` (`c10::cuda::ExchangeDevice`)
   at training step 0. **Workaround for now: `data.num_workers=0`** (the model/diffusion compute
-  dominates, so I/O isn't the bottleneck). Proper fix (deferred): give the DataLoaders a
-  `spawn`/`forkserver` `multiprocessing_context` — needs the injected transforms to be
-  picklable first (the `transforms.py` factories build closures; verify before switching).
+  dominates, so I/O isn't the bottleneck). Proper fix: give the DataLoaders a
+  `spawn`/`forkserver` `multiprocessing_context`. **Verified in-container (2026-06-20)** that
+  `forkserver` + `num_workers=2` streams real batches with CUDA already initialized in the
+  parent — no step-0 crash. The picklability concern is moot: the `transforms.py` pipeline is
+  plain classes (not closures), pickles in ~800 B and runs after a round-trip, and the dataset's
+  lazy h5 handle survives because `__getstate__` drops it. Remaining work is just wiring
+  `multiprocessing_context` into the DataModule's loaders (still defaults to `num_workers=0`).
 - Use an **absolute** repo path for `-v ...:/workspace` in one-off `docker run`s; `$PWD` in a
   detached/background shell may not be the repo root (mount lands wrong → "can't open train.py").
 

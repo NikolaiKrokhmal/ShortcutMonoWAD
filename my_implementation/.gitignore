@@ -3,7 +3,7 @@
 # my_implementation root — a bare `data/` also matched the source package
 # `src/monowad/data/`, silently un-tracking it.
 /data/
-/outputs/
+outputs/
 /wandb/
 /checkpoints/
 *.h5

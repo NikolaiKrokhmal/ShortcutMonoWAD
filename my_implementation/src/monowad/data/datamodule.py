@@ -28,6 +28,28 @@ class KittiDataModule(pl.LightningDataModule):
         self.train_set: KittiMonoDataset | None = None
         self.val_set: KittiMonoDataset | None = None
 
+    def _loader_mp_kwargs(self) -> dict:
+        """DataLoader worker kwargs that only apply when workers are used.
+
+        With ``num_workers>0`` we force a ``forkserver`` start method: Lightning moves the
+        model to the GPU before building the loaders, so the parent already holds a CUDA
+        context — plain ``fork`` workers inherit it and abort at step 0 with
+        ``CUDA error: initialization error``. ``forkserver`` starts clean child interpreters
+        (verified: the transforms pickle and the lazy h5 handle is dropped by ``__getstate__``).
+        Overridable via ``cfg.data.multiprocessing_context``. With ``num_workers=0`` there are
+        no children, and passing these kwargs would raise, so we send none.
+        """
+        n = self.data_cfg.num_workers
+        if n <= 0:
+            return {"num_workers": 0}
+        return {
+            "num_workers": n,
+            "persistent_workers": True,
+            "multiprocessing_context": self.data_cfg.get(
+                "multiprocessing_context", "forkserver"
+            ),
+        }
+
     def setup(self, stage: str | None = None) -> None:
         d = self.data_cfg
         if stage in ("fit", None) and self.train_set is None:
@@ -49,11 +71,10 @@ class KittiDataModule(pl.LightningDataModule):
             self.train_set,
             batch_size=d.batch_size,
             shuffle=True,
-            num_workers=d.num_workers,
             pin_memory=d.pin_memory,
             collate_fn=collate_fn,
             drop_last=True,
-            persistent_workers=d.num_workers > 0,
+            **self._loader_mp_kwargs(),
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -62,9 +83,8 @@ class KittiDataModule(pl.LightningDataModule):
             self.val_set,
             batch_size=d.batch_size,
             shuffle=False,
-            num_workers=d.num_workers,
             pin_memory=d.pin_memory,
             collate_fn=collate_fn,
             drop_last=False,
-            persistent_workers=d.num_workers > 0,
+            **self._loader_mp_kwargs(),
         )

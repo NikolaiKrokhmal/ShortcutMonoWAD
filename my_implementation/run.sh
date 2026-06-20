@@ -9,6 +9,7 @@ docker run --gpus all -it --rm \
     --shm-size=8g \
     -v "$(pwd)":/workspace \
     -v /mnt/c/Niko/Uni/Masters/courses/ai_ev/object:/workspace/data/KITTI/object \
+    -e PYTHONPATH=/workspace/my_implementation/src -e WANDB_MODE=offline \
     -p "$JUPYTER_PORT":8888 \
     "$IMAGE_NAME" \
     jupyter lab \
