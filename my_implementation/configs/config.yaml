@@ -1,0 +1,28 @@
+# Top-level Hydra config. Composes the groups below; override any from the CLI.
+defaults:
+  - paths: default
+  - data: kitti
+  - detector: monowad
+  - optimizer: adam
+  - scheduler: cosine
+  - trainer: default
+  - logger: wandb
+  - _self_
+
+seed: 42
+
+# Optional path to a pretrained MonoWAD_3D state_dict (mono_core.* / bbox_head.* keys).
+# Loaded into the detector at module init with strict=False. null = train from scratch.
+# Override on the CLI: `ckpt_path=null` or `ckpt_path=/path/to/other.pth`.
+ckpt_path: ${paths.root_dir}/checkpoints/MonoWAD_3D.pth
+
+# KITTI AP validation (on_validation_epoch_end). Writes per-frame KITTI result files
+# then scores AP with the numba evaluator (GPU-only). Disable to run inference-only val.
+eval:
+  enabled: true
+  # KITTI ground-truth label_2 dir. Default points at the raw KITTI tree mounted at the
+  # repo root (one level above PROJECT_ROOT=my_implementation). Override on the CLI.
+  label_dir: ${paths.root_dir}/../data/KITTI/object/training/label_2
+  result_dir: ${paths.output_dir}/kitti_results
+  score_thr: 0.4          # detections below this confidence are not written
+  gpu: 0                  # CUDA device for the rotated-IoU kernels

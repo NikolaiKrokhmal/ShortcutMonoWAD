@@ -1,0 +1,4 @@
+# Cosine LR schedule. Values mirror legacy config/config.py (T_max = max_epochs).
+_target_: torch.optim.lr_scheduler.CosineAnnealingLR
+T_max: 120
+eta_min: 5e-6

@@ -1,0 +1,7 @@
+# PROJECT_ROOT is exported by pyrootutils.setup_root() in the entrypoint scripts.
+root_dir: ${oc.env:PROJECT_ROOT}
+data_dir: ${paths.root_dir}/data
+output_dir: ${paths.root_dir}/outputs
+
+train_dir: ${paths.data_dir}/train
+val_dir: ${paths.data_dir}/val

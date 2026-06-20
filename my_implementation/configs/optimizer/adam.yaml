@@ -1,0 +1,6 @@
+# Adam optimizer. Hydra instantiate() -> torch.optim.Adam(params=..., **these).
+# Gradient clipping is NOT here (Adam rejects unknown kwargs); the clip norm lives
+# on the Trainer as gradient_clip_val. Values mirror legacy config/config.py.
+_target_: torch.optim.Adam
+lr: 1e-4
+weight_decay: 0.0

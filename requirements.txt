@@ -5,7 +5,11 @@ einops
 scikit-image
 opencv-python
 easydict
+h5py
 tqdm
-easydict
-tensorboard==2.15.1
+wandb
 numpy==1.26.4
+jupyter
+hydra-core
+pytorch-lightning
+pyrootutils

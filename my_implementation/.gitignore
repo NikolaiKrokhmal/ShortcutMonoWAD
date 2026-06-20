@@ -1,0 +1,24 @@
+# Data & artifacts (regenerable, large — never commit)
+# Anchored with a leading slash so they only match the artifact dirs at the
+# my_implementation root — a bare `data/` also matched the source package
+# `src/monowad/data/`, silently un-tracking it.
+/data/
+outputs/
+/wandb/
+/checkpoints/
+*.h5
+*.pkl
+*.npy
+*.png
+*.pth
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Env
+.env

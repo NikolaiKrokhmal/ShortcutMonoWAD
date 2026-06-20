@@ -1,0 +1,6 @@
+_target_: pytorch_lightning.loggers.WandbLogger
+project: monowad
+entity: null
+name: null            # run name; null → auto
+save_dir: ${paths.output_dir}
+log_model: false
